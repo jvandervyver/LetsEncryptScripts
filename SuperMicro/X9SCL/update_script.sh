@@ -22,13 +22,6 @@ if [ $? -ne 0 ]; then
   exit 1
 fi
 
-printf 'test' | base64 1>/dev/null 2>/dev/null
-
-if [ $? -ne 0 ]; then
-  echo 'Could not base64 encode a String, is base64 installed?'
-  exit 1
-fi
-
 printf 'hi' | grep 'hi' 1>/dev/null 2>/dev/null
 
 if [ $? -ne 0 ]; then
@@ -55,14 +48,6 @@ trap post_script_cleanup INT TERM EXIT
 
 touch "${COOKIES_FILE}" && touch "${CONTENT_FILE}"
 
-function getCSRFToken() {
-  RESULT=`grep 'CSRF_TOKEN' "${CONTENT_FILE}" | grep -oP 'CSRF_TOKEN",\s*"([^"]*)"\);' | grep -oP '(\,\s?"[^"]*")' | grep -oP '("[^"]*")' | cut -d '"' -f 2`
-  printf "$RESULT"
-}
-
-function base64UrlEncode() {
-  printf "$1" | base64 | sed 's/+/-/g; s,/,_,g'
-}
 
 # Runtime variables
 
@@ -79,44 +64,37 @@ fi
 
 KEY_FILE="/${LETS_ENCRYPT_PATH}/privkey.pem"
 
-CSRF_TOKEN=''
-
-ENCODED_USERNAME=`base64UrlEncode "$USERNAME"`
-ENCODED_PASSWORD=`base64UrlEncode "$PASSWORD"`
-
 echo '' && echo '==========> Login to BMC:'
 
-curl "https://${IPMI_HOSTNAME}/cgi/login.cgi" -vvvvv -skSL -X POST -H 'Content-Type: application/x-www-form-urlencoded' -d "name=$ENCODED_USERNAME" -d "pwd=$ENCODED_PASSWORD" -d "check=00" -b "${COOKIES_FILE}" -c "${COOKIES_FILE}" -o "${CONTENT_FILE}"
+curl "https://${IPMI_HOSTNAME}/cgi/login.cgi" -vvvvv -skSL -X POST -H 'Content-Type: application/x-www-form-urlencoded' -d "name=$USERNAME" -d "pwd=$PASSWORD" -b "${COOKIES_FILE}" -c "${COOKIES_FILE}" -o "${CONTENT_FILE}"
 cat "${CONTENT_FILE}"
 
 sleep 1
 
-echo '' && echo '' && echo '==========> Get CSRF_TOKEN:'
+echo '' && echo '' && echo '==========> Load top menu:'
 
 curl "https://${IPMI_HOSTNAME}/cgi/url_redirect.cgi?url_name=topmenu" -vvvvv -skSL -X GET -b "${COOKIES_FILE}" -c "${COOKIES_FILE}" -o "${CONTENT_FILE}"
-CSRF_TOKEN=`getCSRFToken`
 cat "${CONTENT_FILE}"
 
 sleep 1
 
 echo '' && echo '' && echo '==========> Upload SSL certificate and private key:'
 
-curl "https://${IPMI_HOSTNAME}/cgi/upload_ssl.cgi" -vvvvv -skSL -X POST -H 'Expect:' -H "Origin: https://${IPMI_HOSTNAME}" -H "Referer: https://${IPMI_HOSTNAME}/cgi/url_redirect.cgi?url_name=topmenu" -H 'Content-Type: multipart/form-data' -F 'CSRF_TOKEN'="${CSRF_TOKEN}" -F 'cert_file'=@"${CERT_FILE}" -F 'key_file'=@"${KEY_FILE}" -b "${COOKIES_FILE}" -c "${COOKIES_FILE}" -o "${CONTENT_FILE}"
-CSRF_TOKEN=`getCSRFToken`
+curl "https://${IPMI_HOSTNAME}/cgi/upload_ssl.cgi" -vvvvv -skSL -X POST -H 'Expect:' -H 'Content-Type: multipart/form-data' -F 'cert_file'=@"${CERT_FILE}" -F 'key_file'=@"${KEY_FILE}" -b "${COOKIES_FILE}" -c "${COOKIES_FILE}" -o "${CONTENT_FILE}"
 cat "${CONTENT_FILE}"
 
 sleep 1
 
 echo '' && echo '' && echo '==========> Approve the uploaded SSL certificate and private key:'
 
-curl "https://${IPMI_HOSTNAME}/cgi/ipmi.cgi" -vvvvv -skSL -X POST -H "Origin: https://${IPMI_HOSTNAME}" -H "Referer: https://${IPMI_HOSTNAME}/cgi/upload_ssl.cgi" -H 'Content-Type: application/x-www-form-urlencoded; charset=UTF-8' -H "CSRF_TOKEN: ${CSRF_TOKEN}" --data-raw 'op=SSL_VALIDATE.XML&r=(0%2C0)&_=' -b "${COOKIES_FILE}" -c "${COOKIES_FILE}" -o "${CONTENT_FILE}"
+curl "https://${IPMI_HOSTNAME}/cgi/ipmi.cgi" -vvvvv -skSL -X POST -H 'Content-Type: application/x-www-form-urlencoded; charset=UTF-8' -d 'SSL_VALIDATE.XML=(0,0)' -d 'time_stamp=sometime' -d '_=' -b "${COOKIES_FILE}" -c "${COOKIES_FILE}" -o "${CONTENT_FILE}"
 cat "${CONTENT_FILE}"
 
 sleep 1
 
 echo '' && echo '' && echo '==========> Reboot the BMC:'
 
-curl "https://${IPMI_HOSTNAME}/cgi/op.cgi" -vvvvv -skSL -X POST -H "Origin: https://${IPMI_HOSTNAME}" -H "Referer: https://${IPMI_HOSTNAME}/cgi/upload_ssl.cgi" -H 'Content-Type: application/x-www-form-urlencoded; charset=UTF-8'  -H "CSRF_TOKEN: ${CSRF_TOKEN}" --data-raw 'op=main_bmcreset&_=' -b "${COOKIES_FILE}" -c "${COOKIES_FILE}" -o "${CONTENT_FILE}"
+curl "https://${IPMI_HOSTNAME}/cgi/BMCReset.cgi" -vvvvv -skSL -X POST -H 'Content-Type: application/x-www-form-urlencoded; charset=UTF-8' -d 'time_stamp=sometime' -d '_=' -b "${COOKIES_FILE}" -c "${COOKIES_FILE}" -o "${CONTENT_FILE}"
 cat "${CONTENT_FILE}"
 
 echo ''
